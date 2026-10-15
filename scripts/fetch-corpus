@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# LibriSpeech test clips into $XDG_DATA_HOME/murmur/corpus/<name>, with a manifest.tsv
+# (`file.wav<TAB>reference`) for `murmur bench`, as 16kHz mono 16-bit. Needs curl, jq, flac, sox.
+#   librispeech-dummy  hf-internal-testing/librispeech_asr_dummy, all 73 clips (voxtype's baseline)
+#   ami                AMI meetings, headset mics (test), ~100 clips of 3+ words
+#   earnings22         Earnings-22 calls (test, chunked), ~100 clips of 3+ words
+set -euo pipefail
+
+corpus="${XDG_DATA_HOME:-$HOME/.local/share}/murmur/corpus"
+api=https://datasets-server.huggingface.co/rows
+
+# fetch NAME DATASET CONFIG SPLIT PAGE OFFSET...: one PAGE-row page at each offset, so a sample
+# spreads over many speakers instead of the first few minutes of one recording.
+fetch() {
+  local name=$1 dataset=$2 config=$3 split=$4 page=$5 dir n=0
+  shift 5
+  dir=$corpus/$name
+  mkdir -p "$dir"
+  : >"$dir/manifest.tsv.part"
+  for offset in "$@"; do
+    curl -fsS "$api?dataset=$dataset&config=$config&split=$split&offset=$offset&length=$page" |
+      jq -r '.rows[] | .row as $r | [($r.id // $r.audio_id // (if $r.file_id then "\($r.file_id)_\($r.segment_id)" else null end) // (.row_idx | tostring)),
+        $r.audio[0].src, $r.audio[0].type, (($r.text // $r.transcription) | gsub("[\t\n]"; " "))]
+        | select((.[3] | split(" ") | map(select(. != "")) | length) >= 3) | @tsv' |
+      while IFS=$'\t' read -r id url type text; do
+        id=${id//\//_}
+        [ -s "$dir/$id.wav" ] || {
+          case $type in
+            audio/flac)
+              curl -fsS -o "$dir/$id.flac" "$url"
+              flac -s -d -f -o "$dir/$id.src.wav" "$dir/$id.flac"
+              rm "$dir/$id.flac"
+              ;;
+            *) curl -fsS -o "$dir/$id.src.wav" "$url" ;;
+          esac
+          sox "$dir/$id.src.wav" -r 16000 -c 1 -b 16 -e signed-integer "$dir/$id.wav"
+          rm "$dir/$id.src.wav"
+        }
+        printf '%s.wav\t%s\n' "$id" "$text" >>"$dir/manifest.tsv.part"
+        n=$((n + 1))
+      done
+  done
+  mv "$dir/manifest.tsv.part" "$dir/manifest.tsv"
+  echo "$dir/manifest.tsv: $(wc -l <"$dir/manifest.tsv") clips"
+}
+
+case "${1:-librispeech-dummy}" in
+  librispeech-dummy) fetch librispeech-dummy hf-internal-testing/librispeech_asr_dummy clean validation 100 0 ;;
+  ami) fetch ami edinburghcstr/ami ihm test 25 600 3600 6600 9600 12000 ;;
+  earnings22) fetch earnings22 distil-whisper/earnings22 chunked test 20 1000 12000 23000 34000 45000 56000 ;;
+  *) echo "usage: fetch-corpus [librispeech-dummy|ami|earnings22]" >&2; exit 1 ;;
+esac

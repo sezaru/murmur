@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Downloads the comparison models into $XDG_DATA_HOME/murmur/models. Skips files already present.
+set -euo pipefail
+
+models="${XDG_DATA_HOME:-$HOME/.local/share}/murmur/models"
+
+fetch() {
+  local url=$1 dest=$2
+  [ -s "$dest" ] && return 0
+  mkdir -p "$(dirname "$dest")"
+  echo "fetching $(basename "$dest")"
+  curl -fL --retry 3 -o "$dest.part" "$url"
+  mv "$dest.part" "$dest"
+}
+
+phonon() {
+  local hf=https://huggingface.co/tiyuvta/Phonon-2-ONNX/resolve/main dir=$models/phonon-2
+  # Only the int8 encoder: parakeet-rs prefers `encoder-model.onnx` when present, which is
+  # the 2.4GB fp32 graph.
+  for f in encoder-model.int8.onnx decoder_joint-model.onnx vocab.txt config.json; do
+    fetch "$hf/$f" "$dir/$f"
+  done
+}
+
+# The int8 export of nvidia/parakeet-unified-en-0.6b this was built against
+# (nub235/parakeet-unified-en-0.6b-onnx-int8) is no longer public, so point
+# MURMUR_UNIFIED_URL at a mirror of its four files. The `unified` preset also uses voxtype's
+# copy when one exists.
+unified() {
+  local base=${MURMUR_UNIFIED_URL:?set MURMUR_UNIFIED_URL to a mirror of parakeet-unified-en-0.6b-int8}
+  for f in encoder.onnx decoder_joint.onnx tokenizer.model vocab.txt; do
+    fetch "$base/$f" "$models/parakeet-unified-en-0.6b-int8/$f"
+  done
+}
+
+case "${1:-all}" in
+  phonon2) phonon ;;
+  unified) unified ;;
+  all) phonon ;;
+  *) echo "usage: fetch-models [phonon2|unified|all]" >&2; exit 1 ;;
+esac
