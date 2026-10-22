@@ -1,0 +1,30 @@
+# Builds the Nix package natively on x86_64 and aarch64 and pushes it to the
+# public Cachix cache, so machines that use this flake substitute it instead of
+# compiling (aarch64 under emulation is 10-15x slower).
+name: Nix
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: nix build (${{ matrix.system }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-24.04
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: cachix/cachix-action@v15
+        with:
+          name: sezaru
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - run: nix build -L --accept-flake-config .#packages.${{ matrix.system }}.murmur

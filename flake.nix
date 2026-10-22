@@ -26,6 +26,11 @@
     flake-utils.lib.eachDefaultSystem (system: let
       pkgs = import nixpkgs {inherit system;};
     in {
+      packages = {
+        murmur = pkgs.callPackage ./nix/package.nix {};
+        default = self.packages.${system}.murmur;
+      };
+
       devShells.default = devenv.lib.mkShell {
         inherit inputs pkgs;
         modules = [
