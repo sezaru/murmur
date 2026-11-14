@@ -2,7 +2,7 @@
   description = "murmur — local dictation and side-by-side ASR comparison";
 
   inputs = {
-    devenv.url = "github:cachix/devenv";
+    devenv.follows = "devkit/devenv";
 
     nixpkgs.url = "github:cachix/devenv-nixpkgs/rolling";
 
